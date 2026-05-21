@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dial UI</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+        body { background: #f5f5f5; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; }
+        #canvas { position: relative; width: 600px; height: 500px; }
+        .card { position: absolute; width: 90px; height: 90px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: white; cursor: grab; }
+        .card:active { cursor: grabbing; }
+        .card.dragging { z-index: 1000; box-shadow: 0 8px 32px rgba(0,0,0,0.25); transform: scale(1.08); }
+        #center-label { font-size: 24px; font-weight: 500; margin-top: 16px; color: #333; min-height: 40px; }
+        #controls { margin-top: 16px; }
+        button { padding: 8px 20px; border-radius: 8px; border: 1px solid #ccc; background: white; font-size: 14px; cursor: pointer; }
+        button:hover { background: #f0f0f0; }
+        #insert-zone { position: absolute; width: 120px; height: 120px; border-radius: 50%; border: 2px dashed #aaa; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #aaa; pointer-events: none; opacity: 0; transition: opacity 0.3s; z-index: 500; }
+    </style>
+</head>
+<body>
+    <div id="canvas"><div id="insert-zone">놓기</div></div>
+    <div id="center-label">—</div>
+    <div id="controls"><button onclick="addCard()">+ 카드 추가</button></div>
+
+<script>
+const COLORS = ['#E24B4A','#378ADD','#1D9E75','#D85A30','#7F77DD','#D4537E','#639922','#BA7517','#185FA5','#3B6D11'];
+const canvas = document.getElementById('canvas');
+const centerLabel = document.getElementById('center-label');
+const insertZone = document.getElementById('insert-zone');
+let cards = [], rotation = 0, dragging = null;
+let dragOffX = 0, dragOffY = 0, insertIndex = -1;
+let isDraggingDial = false, dialDragStart = { angle: 0, rotation: 0 };
+let cardCounter = 0;
+const RADIUS = 180;
+
+function getCX() { return canvas.offsetWidth / 2; }
+function getCY() { return canvas.offsetHeight / 2; }
+
+function addCard() {
+    cardCounter++;
+    const color = COLORS[(cardCounter - 1) % COLORS.length];
+    const card = { id: cardCounter, color, label: `#${cardCounter}`, el: null, angle: 0 };
+    cards.push(card);
+    const el = document.createElement('div');
+    el.className = 'card';
+    el.style.background = color;
+    el.textContent = card.label;
+    el.dataset.id = card.id;
+    canvas.appendChild(el);
+    card.el = el;
+    setupCardEvents(card);
+    updatePositions(true);
+}
+
+function getAngleForIndex(i, total, offset) {
+    return offset + (i / (total || 1)) * 360;
+}
+
+function updatePositions(animate) {
+    const cx = getCX(), cy = getCY();
+    const total = cards.length;
+    if (total === 0) { centerLabel.textContent = '—'; return; }
+    const effectiveTotal = dragging ? total - 1 : total;
+    let slotIdx = 0;
+    cards.forEach((card) => {
+        if (dragging && card.id === dragging.id) return;
+        const angle = getAngleForIndex(slotIdx, effectiveTotal || 1, rotation);
+        const rad = (angle - 90) * Math.PI / 180;
+        const x = cx + RADIUS * Math.cos(rad) - 45;
+        const y = cy + RADIUS * Math.sin(rad) - 45;
+        card.angle = angle;
+        card.el.style.transition = animate
+            ? 'left 0.35s cubic-bezier(0.34,1.2,0.64,1), top 0.35s cubic-bezier(0.34,1.2,0.64,1)'
+            : 'none';
+        card.el.style.left = x + 'px';
+        card.el.style.top = y + 'px';
+        card.el.style.opacity = '1';
+        slotIdx++;
+    });
+    updateCenterLabel();
+}
+
+function updateCenterLabel() {
+    const visible = cards.filter(c => !dragging || c.id !== dragging.id);
+    if (!visible.length) { centerLabel.textContent = '—'; return; }
+    let closest = visible[0], minDist = Infinity;
+    visible.forEach(card => {
+        let a = ((card.angle % 360) + 360) % 360;
+        let dist = Math.min(Math.abs(a), Math.abs(a - 360));
+        if (dist < minDist) { minDist = dist; closest = card; }
+    });
+    centerLabel.textContent = closest.label;
+}
+
+function setupCardEvents(card) {
+    const el = card.el;
+    el.addEventListener('mousedown', e => {
+        e.preventDefault(); e.stopPropagation();
+        const rect = el.getBoundingClientRect();
+        dragOffX = e.clientX - rect.left;
+        dragOffY = e.clientY - rect.top;
+        card.origIndex = cards.indexOf(card);
+        dragging = card;
+        el.classList.add('dragging');
+        el.style.transition = 'none';
+        el.style.zIndex = 1000;
+        cards.splice(cards.indexOf(card), 1);
+        updatePositions(true);
+    });
+}
+
+function getMouseAngle(mx, my) {
+    return Math.atan2(my - getCY(), mx - getCX()) * 180 / Math.PI;
+}
+
+canvas.addEventListener('mousedown', e => {
+    if (dragging) return;
+    isDraggingDial = true;
+    const rect = canvas.getBoundingClientRect();
+    dialDragStart.angle = getMouseAngle(e.clientX - rect.left, e.clientY - rect.top);
+    dialDragStart.rotation = rotation;
+});
+
+document.addEventListener('mousemove', e => {
+    const canvRect = canvas.getBoundingClientRect();
+    const mx = e.clientX - canvRect.left;
+    const my = e.clientY - canvRect.top;
+    if (dragging) {
+        const x = mx - dragOffX, y = my - dragOffY;
+        dragging.el.style.left = x + 'px';
+        dragging.el.style.top = y + 'px';
+        const cx = getCX(), cy = getCY();
+        const dist = Math.hypot(x + 45 - cx, y + 45 - cy);
+        if (dist < 80) {
+            insertZone.style.left = (cx - 60) + 'px';
+            insertZone.style.top = (cy - 60) + 'px';
+            insertZone.style.opacity = '1';
+            insertIndex = dragging.origIndex;
+        } else {
+            insertZone.style.opacity = '0';
+            insertIndex = -1;
+        }
+        updatePositions(true);
+        return;
+    }
+    if (isDraggingDial) {
+        const angle = getMouseAngle(mx, my);
+        rotation = dialDragStart.rotation + (angle - dialDragStart.angle);
+        updatePositions(false);
+    }
+});
+
+document.addEventListener('mouseup', e => {
+    if (dragging) {
+        const canvRect = canvas.getBoundingClientRect();
+        const mx = e.clientX - canvRect.left;
+        const my = e.clientY - canvRect.top;
+        const x = mx - dragOffX + 45, y = my - dragOffY + 45;
+        const dist = Math.hypot(x - getCX(), y - getCY());
+        const idx = insertIndex !== -1 ? insertIndex : dragging.origIndex;
+        cards.splice(idx, 0, dragging);
+        dragging.el.classList.remove('dragging');
+        dragging.el.style.zIndex = '';
+        dragging.el.style.transform = '';
+        dragging = null;
+        insertIndex = -1;
+        insertZone.style.opacity = '0';
+        updatePositions(true);
+    }
+    isDraggingDial = false;
+});
+
+for (let i = 0; i < 5; i++) addCard();
+</script>
+</body>
+</html>
